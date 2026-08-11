@@ -1,12 +1,27 @@
 """Tests for zotero_arxiv_daily.executor: normalize_path_patterns, filter_corpus, fetch_zotero_corpus, E2E."""
 
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 from omegaconf import OmegaConf
 
 from zotero_arxiv_daily.executor import Executor, normalize_path_patterns
+from zotero_arxiv_daily.feishu import DeliveryResult
 from zotero_arxiv_daily.protocol import CorpusPaper
+
+
+class StubDeliveryClient:
+    def __init__(self):
+        self.calls = []
+
+    def deliver(self, papers, recommendation_date):
+        delivered_papers = list(papers)
+        self.calls.append((delivered_papers, recommendation_date))
+        return DeliveryResult(
+            recommended_count=len(delivered_papers),
+            inserted_count=len(delivered_papers),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -149,16 +164,12 @@ def test_fetch_zotero_corpus_paper_with_zero_collections(config, monkeypatch):
 
 
 def test_run_end_to_end(config, monkeypatch):
-    """Full pipeline: Zotero fetch -> filter -> retrieve -> rerank -> TLDR -> email."""
-    import smtplib
-
+    """Full pipeline: Zotero fetch -> filter -> retrieve -> rerank -> Feishu."""
     from omegaconf import open_dict
 
     from tests.canned_responses import (
-        make_sample_corpus,
         make_sample_paper,
         make_stub_openai_client,
-        make_stub_smtp,
         make_stub_zotero_client,
     )
 
@@ -192,30 +203,26 @@ def test_run_end_to_end(config, monkeypatch):
         lambda self: retrieved,
     )
 
-    # 4. Stub SMTP
-    sent = []
-    monkeypatch.setattr(smtplib, "SMTP", make_stub_smtp(sent))
-
-    # 5. Stub sleep (reranker/retriever)
+    # 4. Stub sleep (reranker/retriever)
     monkeypatch.setattr("zotero_arxiv_daily.retriever.base.sleep", lambda _: None)
 
-    # 6. Run
-    executor = Executor(config)
+    # 5. Run
+    delivery_client = StubDeliveryClient()
+    executor = Executor(config, delivery_client)
     executor.run()
 
     # Assertions
-    assert len(sent) == 1, "Email should have been sent"
-    _, _, email_body = sent[0]
-    assert "text/html" in email_body
+    assert len(delivery_client.calls) == 1
+    delivered_papers, recommendation_date = delivery_client.calls[0]
+    assert [paper.title for paper in delivered_papers] == ["E2E Paper 1", "E2E Paper 2"]
+    assert recommendation_date.tzinfo == ZoneInfo("Asia/Shanghai")
 
 
 def test_run_no_papers_send_empty_false(config, monkeypatch):
-    """When no papers are found and send_empty=false, no email is sent."""
-    import smtplib
-
+    """When no papers are found and send_empty=false, delivery is skipped."""
     from omegaconf import open_dict
 
-    from tests.canned_responses import make_stub_openai_client, make_stub_smtp, make_stub_zotero_client
+    from tests.canned_responses import make_stub_openai_client, make_stub_zotero_client
 
     with open_dict(config):
         config.executor.source = ["arxiv"]
@@ -235,23 +242,20 @@ def test_run_no_papers_send_empty_false(config, monkeypatch):
 
     monkeypatch.setattr(registered_retrievers["arxiv"], "retrieve_papers", lambda self: [])
 
-    sent = []
-    monkeypatch.setattr(smtplib, "SMTP", make_stub_smtp(sent))
     monkeypatch.setattr("zotero_arxiv_daily.retriever.base.sleep", lambda _: None)
 
-    executor = Executor(config)
+    delivery_client = StubDeliveryClient()
+    executor = Executor(config, delivery_client)
     executor.run()
 
-    assert len(sent) == 0, "No email should be sent when no papers and send_empty=false"
+    assert delivery_client.calls == []
 
 
 def test_run_no_papers_send_empty_true(config, monkeypatch):
-    """When no papers are found and send_empty=true, empty email is sent."""
-    import smtplib
-
+    """When no papers are found and send_empty=true, empty delivery is sent."""
     from omegaconf import open_dict
 
-    from tests.canned_responses import make_stub_openai_client, make_stub_smtp, make_stub_zotero_client
+    from tests.canned_responses import make_stub_openai_client, make_stub_zotero_client
 
     with open_dict(config):
         config.executor.source = ["arxiv"]
@@ -271,13 +275,13 @@ def test_run_no_papers_send_empty_true(config, monkeypatch):
 
     monkeypatch.setattr(registered_retrievers["arxiv"], "retrieve_papers", lambda self: [])
 
-    sent = []
-    monkeypatch.setattr(smtplib, "SMTP", make_stub_smtp(sent))
     monkeypatch.setattr("zotero_arxiv_daily.retriever.base.sleep", lambda _: None)
 
-    executor = Executor(config)
+    delivery_client = StubDeliveryClient()
+    executor = Executor(config, delivery_client)
     executor.run()
 
-    assert len(sent) == 1, "Email should be sent even with no papers when send_empty=true"
-    _, _, body = sent[0]
-    assert "text/html" in body
+    assert len(delivery_client.calls) == 1
+    papers, recommendation_date = delivery_client.calls[0]
+    assert papers == []
+    assert recommendation_date.tzinfo == ZoneInfo("Asia/Shanghai")
