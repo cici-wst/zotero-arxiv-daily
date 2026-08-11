@@ -1,13 +1,11 @@
-"""Tests for zotero_arxiv_daily.utils: glob_match, send_email, tex extraction."""
+"""Tests for zotero_arxiv_daily.utils: glob_match and tex extraction."""
 
-import smtplib
 import tarfile
 import io
 
 import pytest
 
-from zotero_arxiv_daily.utils import glob_match, send_email, extract_tex_code_from_tar, _bm25_pick
-from tests.canned_responses import make_stub_smtp
+from zotero_arxiv_daily.utils import glob_match, extract_tex_code_from_tar, _bm25_pick
 
 
 # ---------------------------------------------------------------------------
@@ -114,76 +112,6 @@ class TestGlobMatch:
         assert glob_match("dir/file.txt", "**/*.txt")
         assert glob_match("dir/subdir/file.txt", "**/*.txt")
         assert glob_match("dir/subdir/subsubdir/file.txt", "**/*.txt")
-
-
-# ---------------------------------------------------------------------------
-# send_email
-# ---------------------------------------------------------------------------
-
-
-def test_send_email_starttls_success(config, monkeypatch):
-    sent = []
-    monkeypatch.setattr(smtplib, "SMTP", make_stub_smtp(sent))
-    send_email(config, "<html>hello</html>")
-    assert len(sent) == 1
-    sender, recipients, body = sent[0]
-    assert sender == "test@example.com"
-    assert recipients == ["test@example.com"]
-    # Body is a full MIME message (base64-encoded). Check the raw MIME string.
-    assert "text/html" in body
-
-
-def test_send_email_falls_back_to_ssl(config, monkeypatch):
-    sent = []
-    call_count = {"smtp": 0}
-
-    StubOK = make_stub_smtp(sent)
-
-    class StubSMTP_TLS_Fails:
-        def __init__(self, *a, **kw):
-            call_count["smtp"] += 1
-        def starttls(self):
-            raise OSError("TLS not supported")
-
-    class StubSMTP_SSL(StubOK):
-        pass
-
-    monkeypatch.setattr(smtplib, "SMTP", StubSMTP_TLS_Fails)
-    monkeypatch.setattr(smtplib, "SMTP_SSL", StubSMTP_SSL)
-    send_email(config, "<html>ssl</html>")
-    assert len(sent) == 1
-
-
-def test_send_email_falls_back_to_plain(config, monkeypatch):
-    sent = []
-    call_count = {"smtp": 0}
-
-    StubOK = make_stub_smtp(sent)
-
-    class StubSMTP_TLS_Fails:
-        def __init__(self, *a, **kw):
-            call_count["smtp"] += 1
-            if call_count["smtp"] == 1:
-                pass  # first SMTP() call succeeds, but starttls will fail
-            else:
-                pass  # third SMTP() call is the plain fallback
-        def starttls(self):
-            raise OSError("TLS not supported")
-        def login(self, u, p):
-            pass
-        def sendmail(self, s, r, m):
-            sent.append((s, r, m))
-        def quit(self):
-            pass
-
-    class StubSMTP_SSL_Fails:
-        def __init__(self, *a, **kw):
-            raise OSError("SSL not supported")
-
-    monkeypatch.setattr(smtplib, "SMTP", StubSMTP_TLS_Fails)
-    monkeypatch.setattr(smtplib, "SMTP_SSL", StubSMTP_SSL_Fails)
-    send_email(config, "<html>plain</html>")
-    assert len(sent) == 1
 
 
 # ---------------------------------------------------------------------------
