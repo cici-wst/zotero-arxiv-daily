@@ -9,6 +9,9 @@ from zotero_arxiv_daily.retriever.arxiv_retriever import ArxivRetriever, _run_wi
 import zotero_arxiv_daily.retriever.arxiv_retriever as arxiv_retriever
 
 
+PROCESS_TEST_TIMEOUT_SECONDS = 5
+
+
 def _sleep_and_return(value: str, delay_seconds: float) -> str:
     time.sleep(delay_seconds)
     return value
@@ -65,7 +68,11 @@ def test_arxiv_retriever(config, mock_feedparser, monkeypatch):
 
 def test_run_with_hard_timeout_returns_value():
     result = _run_with_hard_timeout(
-        _sleep_and_return, ("done", 0.01), timeout=1, operation="test op", paper_title="paper"
+        _sleep_and_return,
+        ("done", 0.01),
+        timeout=PROCESS_TEST_TIMEOUT_SECONDS,
+        operation="test op",
+        paper_title="paper",
     )
     assert result == "done"
 
@@ -84,7 +91,11 @@ def test_run_with_hard_timeout_returns_none_on_failure(monkeypatch):
     warnings: list[str] = []
     monkeypatch.setattr(arxiv_retriever, "logger", SimpleNamespace(warning=warnings.append))
     result = _run_with_hard_timeout(
-        _raise_runtime_error, (), timeout=1, operation="test op", paper_title="paper"
+        _raise_runtime_error,
+        (),
+        timeout=PROCESS_TEST_TIMEOUT_SECONDS,
+        operation="test op",
+        paper_title="paper",
     )
     assert result is None
     assert "boom" in warnings[0]

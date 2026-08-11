@@ -5,6 +5,22 @@ import pytest
 from tests.canned_responses import make_sample_paper, make_stub_openai_client
 
 
+class StubEncoding:
+    def encode(self, text: str) -> list[int]:
+        return [ord(character) for character in text]
+
+    def decode(self, tokens: list[int]) -> str:
+        return "".join(chr(token) for token in tokens)
+
+
+@pytest.fixture(autouse=True)
+def _offline_tokenizer(monkeypatch):
+    monkeypatch.setattr(
+        "zotero_arxiv_daily.protocol.tiktoken.encoding_for_model",
+        lambda _: StubEncoding(),
+    )
+
+
 @pytest.fixture()
 def llm_params():
     return {
