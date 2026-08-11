@@ -153,6 +153,7 @@ def _paper_block(paper: Paper, tldr: str | None = None) -> dict[str, object]:
 
 def _card_payload(
     blocks: list[dict[str, object]],
+    *,
     recommended_count: int,
     inserted_count: int,
     table_url: str,
@@ -184,12 +185,18 @@ def _payload_size(payload: dict[str, object]) -> int:
 
 def _fit_single_paper_block(
     paper: Paper,
+    *,
     recommended_count: int,
     inserted_count: int,
     table_url: str,
     max_body_bytes: int,
 ) -> dict[str, object]:
-    empty_payload = _card_payload([_paper_block(paper, "")], recommended_count, inserted_count, table_url)
+    empty_payload = _card_payload(
+        [_paper_block(paper, "")],
+        recommended_count=recommended_count,
+        inserted_count=inserted_count,
+        table_url=table_url,
+    )
     if _payload_size(empty_payload) > max_body_bytes:
         raise ValueError("notification fixed content exceeds the webhook body limit")
     original = paper.tldr or ""
@@ -197,7 +204,12 @@ def _fit_single_paper_block(
     while low < high:
         middle = (low + high + 1) // 2
         block = _paper_block(paper, original[:middle] + _TRUNCATION_MARKER)
-        payload = _card_payload([block], recommended_count, inserted_count, table_url)
+        payload = _card_payload(
+            [block],
+            recommended_count=recommended_count,
+            inserted_count=inserted_count,
+            table_url=table_url,
+        )
         if _payload_size(payload) <= max_body_bytes:
             low = middle
         else:
@@ -208,21 +220,27 @@ def _fit_single_paper_block(
 
 def _single_paper_block_within_limit(
     paper: Paper,
+    *,
     recommended_count: int,
     inserted_count: int,
     table_url: str,
     max_body_bytes: int,
 ) -> dict[str, object]:
     block = _paper_block(paper)
-    payload = _card_payload([block], recommended_count, inserted_count, table_url)
+    payload = _card_payload(
+        [block],
+        recommended_count=recommended_count,
+        inserted_count=inserted_count,
+        table_url=table_url,
+    )
     if _payload_size(payload) <= max_body_bytes:
         return block
     return _fit_single_paper_block(
         paper,
-        recommended_count,
-        inserted_count,
-        table_url,
-        max_body_bytes,
+        recommended_count=recommended_count,
+        inserted_count=inserted_count,
+        table_url=table_url,
+        max_body_bytes=max_body_bytes,
     )
 
 
@@ -234,26 +252,46 @@ def build_notification_payloads(
     max_body_bytes: int = MAX_WEBHOOK_BODY_BYTES,
 ) -> list[dict[str, object]]:
     if not papers:
-        return [_card_payload([], 0, inserted_count, table_url)]
+        return [_card_payload(
+            [],
+            recommended_count=0,
+            inserted_count=inserted_count,
+            table_url=table_url,
+        )]
     payloads: list[dict[str, object]] = []
     blocks: list[dict[str, object]] = []
     for paper in papers:
         candidate = [*blocks, _paper_block(paper)]
-        payload = _card_payload(candidate, len(papers), inserted_count, table_url)
+        payload = _card_payload(
+            candidate,
+            recommended_count=len(papers),
+            inserted_count=inserted_count,
+            table_url=table_url,
+        )
         if _payload_size(payload) <= max_body_bytes:
             blocks = candidate
             continue
         if blocks:
-            payloads.append(_card_payload(blocks, len(papers), inserted_count, table_url))
+            payloads.append(_card_payload(
+                blocks,
+                recommended_count=len(papers),
+                inserted_count=inserted_count,
+                table_url=table_url,
+            ))
         fitted = _single_paper_block_within_limit(
             paper,
-            len(papers),
-            inserted_count,
-            table_url,
-            max_body_bytes,
+            recommended_count=len(papers),
+            inserted_count=inserted_count,
+            table_url=table_url,
+            max_body_bytes=max_body_bytes,
         )
         blocks = [fitted]
-    payloads.append(_card_payload(blocks, len(papers), inserted_count, table_url))
+    payloads.append(_card_payload(
+        blocks,
+        recommended_count=len(papers),
+        inserted_count=inserted_count,
+        table_url=table_url,
+    ))
     return payloads
 
 
@@ -369,7 +407,7 @@ class FeishuClient:
             raise FeishuApiError(f"Feishu {endpoint} response is missing page_token")
         return token
 
-    def list_existing_urls(self) -> set[str]:
+    def list_existing_urls(self) -> frozenset[str]:
         existing: set[str] = set()
         page_token: str | None = None
         while True:
@@ -385,7 +423,7 @@ class FeishuClient:
             data = self._response_data(payload, "record search")
             self._collect_record_urls(data.get("items"), existing)
             if not data.get("has_more"):
-                return existing
+                return frozenset(existing)
             page_token = self._require_page_token(data, "record search")
 
     def _collect_record_urls(self, items: object, output: set[str]) -> None:

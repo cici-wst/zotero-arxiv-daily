@@ -205,6 +205,24 @@ def test_feishu_client_rejects_api_error_code():
         client._get_tenant_token()
 
 
+def test_feishu_client_exposes_http_errors_without_credentials():
+    session = StubSession(lambda *_: StubResponse({}, status_code=500))
+    client = FeishuClient(_settings(), session=session)
+
+    with pytest.raises(FeishuApiError) as error:
+        client._get_tenant_token()
+
+    assert "secret-test" not in str(error.value)
+
+
+def test_feishu_client_rejects_missing_tenant_token():
+    session = StubSession(lambda *_: _success_response())
+    client = FeishuClient(_settings(), session=session)
+
+    with pytest.raises(FeishuApiError, match="missing tenant_access_token"):
+        client._get_tenant_token()
+
+
 def test_validate_table_schema_checks_all_expected_fields():
     def handler(method, url, kwargs):
         if url.endswith("/auth/v3/tenant_access_token/internal"):
@@ -215,6 +233,20 @@ def test_validate_table_schema_checks_all_expected_fields():
     client = FeishuClient(_settings(), session=StubSession(handler))
 
     assert client.validate_table_schema() is None
+
+
+def test_validate_table_schema_names_the_missing_field():
+    fields = [item for item in _field_items() if item["field_name"] != "标题"]
+
+    def handler(method, url, kwargs):
+        if url.endswith("/auth/v3/tenant_access_token/internal"):
+            return _token_response()
+        return _success_response({"items": fields, "has_more": False})
+
+    client = FeishuClient(_settings(), session=StubSession(handler))
+
+    with pytest.raises(FeishuApiError, match="标题"):
+        client.validate_table_schema()
 
 
 def test_list_existing_urls_follows_pagination():
@@ -232,7 +264,33 @@ def test_list_existing_urls_follows_pagination():
 
     client = FeishuClient(_settings(), session=StubSession(handler))
 
-    assert client.list_existing_urls() == {"https://arxiv.org/abs/1", "https://arxiv.org/abs/2"}
+    result = client.list_existing_urls()
+
+    assert result == frozenset({"https://arxiv.org/abs/1", "https://arxiv.org/abs/2"})
+    assert isinstance(result, frozenset)
+
+
+def test_list_existing_urls_rejects_malformed_url_field():
+    def handler(method, url, kwargs):
+        if url.endswith("/auth/v3/tenant_access_token/internal"):
+            return _token_response()
+        return _success_response({
+            "items": [{"fields": {"论文URL": {"text": "not-a-string"}}}],
+            "has_more": False,
+        })
+
+    client = FeishuClient(_settings(), session=StubSession(handler))
+
+    with pytest.raises(FeishuApiError, match="论文URL"):
+        client.list_existing_urls()
+
+
+def test_batch_create_records_skips_request_for_empty_input():
+    session = StubSession(lambda *_: pytest.fail("empty input must not make an HTTP request"))
+    client = FeishuClient(_settings(), session=session)
+
+    assert client.batch_create_records([]) == 0
+    assert session.calls == []
 
 
 def test_batch_create_records_chunks_at_api_limit():
@@ -251,6 +309,25 @@ def test_batch_create_records_chunks_at_api_limit():
     assert [len(call["records"]) for call in calls] == [1000, 1]
 
 
+def test_batch_create_records_exposes_second_batch_error():
+    batch_count = 0
+
+    def handler(method, url, kwargs):
+        nonlocal batch_count
+        if url.endswith("/auth/v3/tenant_access_token/internal"):
+            return _token_response()
+        batch_count += 1
+        if batch_count == 2:
+            return StubResponse({"code": 999, "msg": "second batch denied"})
+        return _success_response()
+
+    client = FeishuClient(_settings(), session=StubSession(handler))
+    records = [{"标题": str(index)} for index in range(1001)]
+
+    with pytest.raises(FeishuApiError, match="second batch denied"):
+        client.batch_create_records(records)
+
+
 def test_send_notification_posts_each_card_and_requires_success():
     def handler(method, url, kwargs):
         assert method == "POST"
@@ -261,6 +338,19 @@ def test_send_notification_posts_each_card_and_requires_success():
     paper = make_sample_paper(tldr="A summary")
 
     assert client.send_notification([paper], inserted_count=1) == 1
+
+
+def test_send_notification_hides_webhook_url_when_api_rejects_request():
+    client = FeishuClient(
+        _settings(),
+        session=StubSession(lambda *_: StubResponse({"code": 999, "msg": "rejected"})),
+    )
+
+    with pytest.raises(FeishuApiError) as error:
+        client.send_notification([make_sample_paper()], inserted_count=0)
+
+    assert "group webhook" in str(error.value)
+    assert _settings().webhook_url not in str(error.value)
 
 
 class RecordingDeliveryClient(FeishuClient):
