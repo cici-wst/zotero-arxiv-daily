@@ -29,13 +29,15 @@
 
 > Track new scientific researches of your interest by just forking (and staring) this repo!😊
 
-*Zotero-arXiv-Daily* finds arxiv papers that may attract you based on the context of your Zotero library, and then sends the result to your mailbox📮. It can be deployed as Github Action Workflow with **zero cost**, **no installation**, and **few configuration** of Github Action environment variables for daily **automatic** delivery.
+*Zotero-arXiv-Daily* finds papers that may attract you based on the context of your Zotero library, stores the recommendations in Feishu Bitable, and posts a summary card to a Feishu group. It can be deployed as a GitHub Actions workflow with **zero cost**, **no installation**, and a small set of repository secrets for daily **automatic** delivery.
 
 ## ✨ Features
 - Totally free! All the calculation can be done in the Github Action runner locally within its quota (for public repo).
 - AI-generated TL;DR for you to quickly pick up target papers.
 - Affiliations of the paper are resolved and presented.
-- Links of PDF and code implementation (if any) presented in the e-mail.
+- Paper links, metadata, and TLDRs are persisted in Feishu Bitable.
+- Feishu group cards link directly to the recommended papers and the Bitable.
+- Canonical paper URLs prevent duplicate Bitable records across repeated workflow runs.
 - List of papers sorted by relevance with your recent research interest.
 - Fast deployment via fork this repo and set environment variables in the Github Action Page.
 - Support LLM API for generating TL;DR of papers.
@@ -53,7 +55,25 @@
 1. Fork (and star😘) this repo.
 ![fork](./assets/fork.png)
 
-2. Set Github Action environment variables.
+2. Prepare Feishu.
+
+   - Create a Feishu self-built app, grant the Bitable read/write permissions required to list fields, search records, and batch-create records, then publish the app version.
+   - Open the target Bitable and add the self-built app as a collaborator with edit permission.
+   - In the target Feishu group, add a **Custom Bot** and copy its Webhook URL.
+   - This fork is configured for the Bitable at `https://my.feishu.cn/base/VifgbgBseaSpyIsCpH8cIlqVnub`, table `论文推荐`.
+
+   The table schema is validated at runtime and must contain these fields with the exact types:
+
+   | Field | Feishu type |
+   | :--- | :--- |
+   | 标题、论文URL、作者、摘要、TLDR、作者单位 | Text |
+   | 论文链接、代码链接 | URL |
+   | 来源 | Single select |
+   | 分类 | Multiple select |
+   | 相关度 | Number |
+   | 发布日期、推荐日期 | Date |
+
+3. Set GitHub Actions secrets.
 ![secrets](./assets/secrets.png)
 
 Below are all the secrets you need to set. They are invisible to anyone including you once they are set, for security.
@@ -62,11 +82,13 @@ Below are all the secrets you need to set. They are invisible to anyone includin
 | :---  | :---  | :--- |
 | ZOTERO_ID  | User ID of your Zotero account. **User ID is not your username, but a sequence of numbers**Get your ID from [here](https://www.zotero.org/settings/security). You can find it at the position shown in this [screenshot](https://github.com/TideDra/zotero-arxiv-daily/blob/main/assets/userid.png). | 12345678  |
 | ZOTERO_KEY | An Zotero API key with read access. Get a key from [here](https://www.zotero.org/settings/security).  | AB5tZ877P2j7Sm2Mragq041H   |
-| SENDER | The email account of the SMTP server that sends you email. | abc@qq.com |
-| SENDER_PASSWORD | The password of the sender account. Note that it's not necessarily the password for logging in the e-mail client, but the authentication code for SMTP service. Ask your email provider for this.   | abcdefghijklmn |
-| RECEIVER | The e-mail address that receives the paper list. | abc@outlook.com |
 | OPENAI_API_KEY | API Key when using the API to access LLMs. You can get FREE API for using advanced open source LLMs in [SiliconFlow](https://cloud.siliconflow.cn/i/b3XhBRAm). | sk-xxx |
 | OPENAI_API_BASE | API URL when using the API to access LLMs. | https://api.siliconflow.cn/v1 |
+| FEISHU_APP_ID | App ID of the published Feishu self-built application. | cli_xxx |
+| FEISHU_APP_SECRET | App Secret of the Feishu self-built application. | Keep this value only in GitHub Secrets |
+| FEISHU_WEBHOOK_URL | Webhook URL of the Custom Bot in the target Feishu group. | `https://open.feishu.cn/open-apis/bot/v2/hook/...` |
+
+The SMTP secrets `SENDER`, `SENDER_PASSWORD`, and `RECEIVER` are no longer used.
 
 Then you should also set a public variable `CUSTOM_CONFIG` for your custom configuration.
 ![vars](./assets/repo_var.png)
@@ -78,12 +100,12 @@ zotero:
   api_key: ${oc.env:ZOTERO_KEY}
   include_path: null # Or e.g. ["2026/survey/**", "2026/reading-group/**"]
 
-email:
-  sender: ${oc.env:SENDER}
-  receiver: ${oc.env:RECEIVER}
-  smtp_server: smtp.qq.com
-  smtp_port: 465
-  sender_password: ${oc.env:SENDER_PASSWORD}
+feishu:
+  app_id: ${oc.env:FEISHU_APP_ID}
+  app_secret: ${oc.env:FEISHU_APP_SECRET}
+  app_token: VifgbgBseaSpyIsCpH8cIlqVnub
+  table_id: tblphxHROAQPFf4k
+  webhook_url: ${oc.env:FEISHU_WEBHOOK_URL}
 
 llm:
   api:
@@ -121,12 +143,12 @@ source:
   medrxiv:
     category: null # The categories of target medrxiv papers. Find categories from [here](https://www.medrxiv.org/) Example: ["psychiatry and clinical psychology", "neurology"]
 
-email:
-  sender: ??? # The email account of the SMTP server that sends you email. Example: abc@qq.com
-  receiver: ??? # The email account that receives the paper list. Example: abc@outlook.com
-  smtp_server: ??? # The SMTP server that sends the email. Ask your email provider (Gmail, QQ, Outlook, ...) for its SMTP server. Example: smtp.qq.com
-  smtp_port: ??? # The port of SMTP server. Example: 465
-  sender_password: ??? # The password of the sender account. Note that it's not necessarily the password for logging in the e-mail client, but the authentication code for SMTP service. Ask your email provider for this. Example: abcdefghijklmn
+feishu:
+  app_id: ??? # App ID of the published Feishu self-built application.
+  app_secret: ??? # App Secret of the Feishu self-built application.
+  app_token: ??? # Bitable app token from the table URL.
+  table_id: ??? # Bitable table ID from the table URL.
+  webhook_url: ??? # Webhook URL of the Custom Bot in the target Feishu group.
 
 llm:
   api:
@@ -153,8 +175,8 @@ reranker:
 
 executor:
   debug: false # Whether to use debug mode. Example: true
-  send_empty: false # Whether to send an empty email even if no new papers today. Example: true
-  max_paper_num: 100 # The maximum number of the papers presented in the email. Example: 100
+  send_empty: false # Whether to send an empty Feishu notification even if no new papers today. Example: true
+  max_paper_num: 100 # The maximum number of papers delivered to Feishu. Example: 100
   source: ??? # The sources of papers to retrieve. Example: ['arxiv','biorxiv','medrxiv']
   reranker: local # The reranker to use. Example: 'local' or 'api'
 ```
@@ -163,11 +185,13 @@ That's all! Now you can test the workflow by manually triggering it:
 ![test](./assets/test.png)
 
 > [!NOTE]
-> The Test-Workflow Action is the debug version of the main workflow (Send-emails-daily), which always retrieve 5 arxiv papers regardless of the date. While the main workflow will be automatically triggered everyday and retrieve new papers released yesterday. There is no new arxiv paper at weekends and holiday, in which case you may see "No new papers found" in the log of main workflow.
+> The `Test Feishu delivery` workflow is the debug version of the main workflow. The main workflow runs daily and retrieves papers released on the previous day. There may be no new arXiv papers on weekends and holidays, in which case the log reports `No new papers found`.
 
-Then check the log and the receiver email after it finishes.
+After it finishes, check the Actions log, the `论文推荐` Bitable, and the Feishu group containing the Custom Bot.
 
-By default, the main workflow runs on 22:00 UTC everyday. You can change this time by editting the workflow config `.github/workflows/main.yml`.
+By default, the main workflow runs at 22:00 UTC, which is 06:00 the next day in Beijing time. You can change this time by editing `.github/workflows/main.yml`.
+
+Each run normalizes arXiv and bioRxiv/medRxiv URLs before comparing them with existing Bitable records. Re-running a workflow therefore does not insert the same paper again. Group Webhook delivery is at-least-once: a manual rerun can post another group card even when all table records already exist.
 
 ### Local Running
 Supported by [uv](https://github.com/astral-sh/uv), this workflow can easily run on your local device if uv is installed:
@@ -186,7 +210,7 @@ This project is in active development. You can subscribe this repo via `Watch` s
 
 
 ## 📖 How it works
-*Zotero-arXiv-Daily* firstly retrieves all the papers in your Zotero library and all the papers released in the previous day, via corresponding API. Then it calculates the embedding of each paper's abstract via an embedding model. The score of a paper is its weighted average similarity over all your Zotero papers (newer paper added to the library has higher weight). The TLDR of each paper is generated by LLM, given the text extracted by pymupdf4llm.
+*Zotero-arXiv-Daily* retrieves papers from your Zotero library and papers released on the previous day. It calculates embedding similarity, reranks candidates, and generates TLDRs with an OpenAI-compatible API. Before delivery, it validates the 13-field Feishu Bitable schema, canonicalizes paper URLs, skips records already present in the table, batch-creates new records, and finally posts one or more size-limited interactive cards to the Feishu group.
 
 ## 📌 Limitations
 - The recommendation algorithm is very simple, it may not accurately reflect your interest. Welcome better ideas for improving the algorithm!

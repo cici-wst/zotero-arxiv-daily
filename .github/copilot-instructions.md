@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Zotero-arXiv-Daily recommends new arXiv/bioRxiv/medRxiv papers based on a user's Zotero library. It computes embedding similarity between new papers and the user's existing library, generates TLDRs via LLM, and delivers results by email. Designed to run as a GitHub Actions workflow at zero cost.
+Zotero-arXiv-Daily recommends new arXiv/bioRxiv/medRxiv papers based on a user's Zotero library. It computes embedding similarity, generates TLDRs via an LLM, persists recommendations in Feishu Bitable, and notifies a Feishu group. It is designed to run as a GitHub Actions workflow at zero cost.
 
 ## Commands
 
@@ -34,7 +34,9 @@ The app is a linear pipeline orchestrated by `Executor` (`src/zotero_arxiv_daily
 3. **Retrieve new papers** → from configured sources (arXiv RSS, bioRxiv/medRxiv REST API)
 4. **Rerank** → weighted embedding similarity to corpus (newer Zotero papers weighted higher)
 5. **Generate TLDRs + affiliations** → OpenAI-compatible LLM API
-6. **Render + send email** → HTML email via SMTP
+6. **Persist + notify through Feishu** → schema validation, canonical URL deduplication, Bitable batch writes, and interactive group cards
+
+`main.py` is the composition root. It creates immutable `FeishuSettings`, constructs `FeishuClient`, and injects the client into `Executor`. Keep retrieval/reranking concerns in `Executor` and Feishu HTTP behavior in `feishu.py`.
 
 ### Plugin Systems
 
@@ -47,6 +49,8 @@ When adding a new retriever or reranker, follow the existing pattern: create a n
 ### Configuration
 
 Uses Hydra + OmegaConf. Config composes from `config/base.yaml` (defaults with `???` placeholders for required values) + `config/custom.yaml` (user overrides). The composition order is defined in `config/default.yaml`. Environment variables are interpolated via `${oc.env:VAR_NAME,default}` syntax. Entry point uses `@hydra.main(config_name="default")`.
+
+Feishu credentials are read from `FEISHU_APP_ID`, `FEISHU_APP_SECRET`, and `FEISHU_WEBHOOK_URL`. The Bitable app token and table ID are regular configuration values. SMTP configuration is obsolete.
 
 ### Data Classes
 
@@ -66,8 +70,9 @@ Uses Hydra + OmegaConf. Config composes from `config/base.yaml` (defaults with `
 - **Type hints:** Modern Python 3.10+ syntax (`list[Paper]`, `str | None`).
 - **Constants:** Module-level `UPPER_SNAKE_CASE`.
 - **Private methods:** Prefixed with `_` (e.g., `_retrieve_raw_papers`).
-- **Error handling:** Graceful degradation with try/except and fallback logic; log warnings rather than raising.
-- **Config injection:** All major components receive `DictConfig` at init and store it as `self.config`.
+- **Error handling:** Expose authentication, schema, API, and malformed-response failures explicitly; do not add silent fallback behavior.
+- **Dependency injection:** `Executor` receives a delivery client. Construct concrete clients only in the composition root.
+- **Configuration:** Pipeline components use `DictConfig`; Feishu credentials are converted to immutable `FeishuSettings` at the boundary.
 
 ## Git Workflow
 

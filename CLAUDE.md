@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Zotero-arXiv-Daily recommends new arXiv/bioRxiv/medRxiv papers based on a user's Zotero library. It computes embedding similarity between new papers and the user's existing library, generates TLDRs via LLM, and delivers results by email. Designed to run as a GitHub Actions workflow at zero cost.
+Zotero-arXiv-Daily recommends new arXiv/bioRxiv/medRxiv papers based on a user's Zotero library. It computes embedding similarity, generates TLDRs via an LLM, persists recommendations in Feishu Bitable, and notifies a Feishu group. It is designed to run as a GitHub Actions workflow at zero cost.
 
 ## Commands
 
@@ -36,7 +36,9 @@ The app follows a linear pipeline orchestrated by `Executor` (`src/zotero_arxiv_
 3. **Retrieve new papers** — fetches from configured sources (arXiv RSS, bioRxiv/medRxiv REST API)
 4. **Rerank** — scores candidates by weighted similarity to corpus (newer Zotero papers weighted higher)
 5. **Generate TLDRs + affiliations** — via OpenAI-compatible LLM API
-6. **Render + send email** — HTML email via SMTP
+6. **Persist + notify through Feishu** — validate the Bitable schema, canonicalize URLs, skip existing records, batch-create new records, and send interactive group cards
+
+`main.py` is the composition root. It creates immutable `FeishuSettings`, constructs `FeishuClient`, and injects the client into `Executor`. `Executor` owns the recommendation pipeline; `FeishuClient` owns Feishu authentication, pagination, Bitable writes, URL idempotency, and Webhook delivery.
 
 ### Plugin Systems
 
@@ -47,6 +49,8 @@ The app follows a linear pipeline orchestrated by `Executor` (`src/zotero_arxiv_
 ### Configuration
 
 Uses Hydra + OmegaConf. Config is composed from `config/base.yaml` (defaults) + `config/custom.yaml` (user overrides). Environment variables are interpolated via `${oc.env:VAR_NAME,default}` syntax. Entry point uses `@hydra.main`.
+
+Feishu credentials come from `FEISHU_APP_ID`, `FEISHU_APP_SECRET`, and `FEISHU_WEBHOOK_URL`. The configured Bitable uses app token `VifgbgBseaSpyIsCpH8cIlqVnub` and table ID `tblphxHROAQPFf4k`. SMTP configuration is obsolete.
 
 ### Data Classes
 
