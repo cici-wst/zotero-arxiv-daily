@@ -1,4 +1,4 @@
-"""Tests for zotero_arxiv_daily.protocol: Paper.generate_tldr, Paper.generate_affiliations."""
+"""Tests for zotero_arxiv_daily.protocol.Paper.generate_tldr."""
 
 import pytest
 
@@ -71,70 +71,8 @@ def test_tldr_truncates_long_prompt(llm_params):
     assert result is not None
 
 
-# ---------------------------------------------------------------------------
-# generate_affiliations
-# ---------------------------------------------------------------------------
-
-
-def test_affiliations_returns_parsed_list(llm_params):
-    client = make_stub_openai_client()
+def test_paper_has_no_affiliation_generation_path():
     paper = make_sample_paper()
-    result = paper.generate_affiliations(client, llm_params)
-    assert isinstance(result, list)
-    assert "TsingHua University" in result
-    assert "Peking University" in result
 
-
-def test_affiliations_none_without_fulltext(llm_params):
-    client = make_stub_openai_client()
-    paper = make_sample_paper(full_text=None)
-    result = paper.generate_affiliations(client, llm_params)
-    assert result is None
-
-
-def test_affiliations_deduplicates(llm_params):
-    """The stub returns two distinct affiliations, so no dedup needed.
-    But confirm the set() dedup in the code doesn't break anything.
-    """
-    client = make_stub_openai_client()
-    paper = make_sample_paper()
-    result = paper.generate_affiliations(client, llm_params)
-    assert len(result) == len(set(result))
-
-
-def test_affiliations_malformed_llm_output(llm_params):
-    """LLM returns affiliations without JSON brackets. Should fall back gracefully."""
-    from types import SimpleNamespace
-
-    def create_no_brackets(**kwargs):
-        return SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(content="TsingHua University, Peking University"),
-                )
-            ]
-        )
-
-    client = SimpleNamespace(
-        chat=SimpleNamespace(
-            completions=SimpleNamespace(create=create_no_brackets)
-        )
-    )
-    paper = make_sample_paper()
-    result = paper.generate_affiliations(client, llm_params)
-    # re.search for [...] will fail -> AttributeError -> caught -> returns None
-    assert result is None
-
-
-def test_affiliations_error_returns_none(llm_params):
-    from types import SimpleNamespace
-
-    broken_client = SimpleNamespace(
-        chat=SimpleNamespace(
-            completions=SimpleNamespace(create=lambda **kw: (_ for _ in ()).throw(RuntimeError("boom")))
-        )
-    )
-    paper = make_sample_paper()
-    result = paper.generate_affiliations(broken_client, llm_params)
-    assert result is None
-    assert paper.affiliations is None
+    assert not hasattr(paper, "affiliations")
+    assert not hasattr(paper, "generate_affiliations")

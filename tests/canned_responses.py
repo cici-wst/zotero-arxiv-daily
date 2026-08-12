@@ -10,8 +10,6 @@ from zotero_arxiv_daily.protocol import CorpusPaper, Paper
 # OpenAI client stub
 # ---------------------------------------------------------------------------
 
-_AFFILIATION_MARKER = "You are an assistant who perfectly extracts affiliations"
-_AFFILIATION_RESPONSE = '["TsingHua University","Peking University"]'
 _TLDR_RESPONSE = "Hello! How can I assist you today?"
 
 
@@ -32,10 +30,6 @@ def _make_chat_response(content: str) -> SimpleNamespace:
 
 
 def _stub_chat_create(**kwargs):
-    messages = kwargs.get("messages", [])
-    request_str = str(messages)
-    if _AFFILIATION_MARKER in request_str:
-        return _make_chat_response(_AFFILIATION_RESPONSE)
     return _make_chat_response(_TLDR_RESPONSE)
 
 
@@ -139,7 +133,6 @@ def make_sample_paper(**overrides) -> Paper:
         pdf_url="https://arxiv.org/pdf/2026.00001",
         full_text="\\begin{document} Some text. \\end{document}",
         tldr=None,
-        affiliations=None,
         score=None,
     )
     defaults.update(overrides)

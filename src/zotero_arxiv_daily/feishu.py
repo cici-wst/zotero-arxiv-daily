@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -11,9 +10,10 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import requests
-from loguru import logger
 from omegaconf import DictConfig
 
+from .feishu_cards import MAX_WEBHOOK_BODY_BYTES
+from .feishu_cards import build_notification_payloads as _build_notification_payloads
 from .protocol import Paper
 
 
@@ -21,25 +21,30 @@ _ARXIV_PATH_RE = re.compile(r"^/(?:abs|pdf|html|e-print)/(.+?)(?:\.pdf)?$")
 _ARXIV_VERSION_RE = re.compile(r"v\d+$", re.IGNORECASE)
 _PREPRINT_PATH_RE = re.compile(r"^/content/(10\.1101/.+?)(?:v\d+)(?:\.full\.pdf)?$")
 _SHANGHAI_TIME_ZONE = ZoneInfo("Asia/Shanghai")
-MAX_WEBHOOK_BODY_BYTES = 20 * 1024
 HTTP_TIMEOUT_SECONDS = 30
 BITABLE_BATCH_LIMIT = 1000
-_TRUNCATION_MARKER = "\n…（完整内容见多维表格）"
+FIELD_PAGE_SIZE = 100
+RECORD_PAGE_SIZE = 500
+FIELD_TYPE_TEXT = 1
+FIELD_TYPE_NUMBER = 2
+FIELD_TYPE_SINGLE_SELECT = 3
+FIELD_TYPE_MULTI_SELECT = 4
+FIELD_TYPE_DATE = 5
+FIELD_TYPE_URL = 15
 _OPEN_API_BASE = "https://open.feishu.cn/open-apis"
 EXPECTED_FIELD_TYPES: Mapping[str, int] = MappingProxyType({
-    "标题": 1,
-    "论文URL": 1,
-    "论文链接": 15,
-    "作者": 1,
-    "摘要": 1,
-    "TLDR": 1,
-    "作者单位": 1,
-    "来源": 3,
-    "分类": 4,
-    "相关度": 2,
-    "发布日期": 5,
-    "推荐日期": 5,
-    "代码链接": 15,
+    "标题": FIELD_TYPE_TEXT,
+    "作者": FIELD_TYPE_TEXT,
+    "摘要": FIELD_TYPE_TEXT,
+    "TLDR": FIELD_TYPE_TEXT,
+    "来源": FIELD_TYPE_SINGLE_SELECT,
+    "分类": FIELD_TYPE_MULTI_SELECT,
+    "相关度": FIELD_TYPE_NUMBER,
+    "发布日期": FIELD_TYPE_DATE,
+    "推荐日期": FIELD_TYPE_DATE,
+    "代码链接": FIELD_TYPE_URL,
+    "论文URL": FIELD_TYPE_TEXT,
+    "论文链接": FIELD_TYPE_URL,
 })
 
 
@@ -118,17 +123,16 @@ def paper_to_record_fields(paper: Paper, recommendation_date: datetime) -> dict[
     canonical_url = normalize_paper_url(paper.url)
     fields: dict[str, object] = {
         "标题": paper.title,
-        "论文URL": canonical_url,
-        "论文链接": {"text": "打开论文", "link": canonical_url},
         "作者": ", ".join(paper.authors),
         "摘要": paper.abstract,
         "TLDR": paper.tldr or "",
-        "作者单位": ", ".join(paper.affiliations or []),
         "来源": paper.source,
         "推荐日期": _shanghai_midnight_ms(recommendation_date),
     }
     if paper.score is not None:
         fields["相关度"] = paper.score
+    fields["论文URL"] = canonical_url
+    fields["论文链接"] = {"text": "打开论文", "link": canonical_url}
     return fields
 
 
@@ -144,106 +148,6 @@ def deduplicate_papers(papers: Sequence[Paper]) -> list[Paper]:
     return unique_papers
 
 
-def _paper_block(paper: Paper, tldr: str | None = None) -> dict[str, object]:
-    canonical_url = normalize_paper_url(paper.url)
-    summary = paper.tldr or "" if tldr is None else tldr
-    content = f"**{paper.title}**\n{summary}\n[查看论文]({canonical_url})"
-    return {"tag": "div", "text": {"tag": "lark_md", "content": content}}
-
-
-def _card_payload(
-    blocks: list[dict[str, object]],
-    *,
-    recommended_count: int,
-    inserted_count: int,
-    table_url: str,
-) -> dict[str, object]:
-    summary = f"今日推荐 {recommended_count} 篇，新增入表 {inserted_count} 篇。"
-    elements = [{"tag": "div", "text": {"tag": "plain_text", "content": summary}}, *blocks]
-    elements.append({
-        "tag": "action",
-        "actions": [{
-            "tag": "button",
-            "text": {"tag": "plain_text", "content": "打开多维表格"},
-            "url": table_url,
-            "type": "primary",
-        }],
-    })
-    return {
-        "msg_type": "interactive",
-        "card": {
-            "config": {"wide_screen_mode": True},
-            "header": {"title": {"tag": "plain_text", "content": "每日论文推荐"}},
-            "elements": elements,
-        },
-    }
-
-
-def _payload_size(payload: dict[str, object]) -> int:
-    return len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
-
-
-def _fit_single_paper_block(
-    paper: Paper,
-    *,
-    recommended_count: int,
-    inserted_count: int,
-    table_url: str,
-    max_body_bytes: int,
-) -> dict[str, object]:
-    empty_payload = _card_payload(
-        [_paper_block(paper, "")],
-        recommended_count=recommended_count,
-        inserted_count=inserted_count,
-        table_url=table_url,
-    )
-    if _payload_size(empty_payload) > max_body_bytes:
-        raise ValueError("notification fixed content exceeds the webhook body limit")
-    original = paper.tldr or ""
-    low, high = 0, len(original)
-    while low < high:
-        middle = (low + high + 1) // 2
-        block = _paper_block(paper, original[:middle] + _TRUNCATION_MARKER)
-        payload = _card_payload(
-            [block],
-            recommended_count=recommended_count,
-            inserted_count=inserted_count,
-            table_url=table_url,
-        )
-        if _payload_size(payload) <= max_body_bytes:
-            low = middle
-        else:
-            high = middle - 1
-    logger.warning(f"Truncated Feishu notification TLDR for paper: {paper.title}")
-    return _paper_block(paper, original[:low] + _TRUNCATION_MARKER)
-
-
-def _single_paper_block_within_limit(
-    paper: Paper,
-    *,
-    recommended_count: int,
-    inserted_count: int,
-    table_url: str,
-    max_body_bytes: int,
-) -> dict[str, object]:
-    block = _paper_block(paper)
-    payload = _card_payload(
-        [block],
-        recommended_count=recommended_count,
-        inserted_count=inserted_count,
-        table_url=table_url,
-    )
-    if _payload_size(payload) <= max_body_bytes:
-        return block
-    return _fit_single_paper_block(
-        paper,
-        recommended_count=recommended_count,
-        inserted_count=inserted_count,
-        table_url=table_url,
-        max_body_bytes=max_body_bytes,
-    )
-
-
 def build_notification_payloads(
     papers: Sequence[Paper],
     inserted_count: int,
@@ -251,48 +155,13 @@ def build_notification_payloads(
     *,
     max_body_bytes: int = MAX_WEBHOOK_BODY_BYTES,
 ) -> list[dict[str, object]]:
-    if not papers:
-        return [_card_payload(
-            [],
-            recommended_count=0,
-            inserted_count=inserted_count,
-            table_url=table_url,
-        )]
-    payloads: list[dict[str, object]] = []
-    blocks: list[dict[str, object]] = []
-    for paper in papers:
-        candidate = [*blocks, _paper_block(paper)]
-        payload = _card_payload(
-            candidate,
-            recommended_count=len(papers),
-            inserted_count=inserted_count,
-            table_url=table_url,
-        )
-        if _payload_size(payload) <= max_body_bytes:
-            blocks = candidate
-            continue
-        if blocks:
-            payloads.append(_card_payload(
-                blocks,
-                recommended_count=len(papers),
-                inserted_count=inserted_count,
-                table_url=table_url,
-            ))
-        fitted = _single_paper_block_within_limit(
-            paper,
-            recommended_count=len(papers),
-            inserted_count=inserted_count,
-            table_url=table_url,
-            max_body_bytes=max_body_bytes,
-        )
-        blocks = [fitted]
-    payloads.append(_card_payload(
-        blocks,
-        recommended_count=len(papers),
-        inserted_count=inserted_count,
-        table_url=table_url,
-    ))
-    return payloads
+    return _build_notification_payloads(
+        papers,
+        inserted_count,
+        table_url,
+        normalize_url=normalize_paper_url,
+        max_body_bytes=max_body_bytes,
+    )
 
 
 class FeishuClient:
@@ -370,7 +239,7 @@ class FeishuClient:
         actual_types: dict[str, int] = {}
         page_token: str | None = None
         while True:
-            params: dict[str, object] = {"page_size": 100}
+            params: dict[str, object] = {"page_size": FIELD_PAGE_SIZE}
             if page_token:
                 params["page_token"] = page_token
             payload = self._api_request("GET", self._table_path("fields"), params=params)
@@ -378,20 +247,22 @@ class FeishuClient:
             items = data.get("items")
             if not isinstance(items, list):
                 raise FeishuApiError("Feishu field list response has invalid items")
-            self._collect_field_types(items, actual_types)
+            actual_types = {**actual_types, **self._parse_field_types(items)}
             if not data.get("has_more"):
                 break
             page_token = self._require_page_token(data, "field list")
         self._check_field_types(actual_types)
 
-    def _collect_field_types(self, items: list[object], output: dict[str, int]) -> None:
+    def _parse_field_types(self, items: list[object]) -> dict[str, int]:
+        field_types: dict[str, int] = {}
         for item in items:
             if not isinstance(item, dict):
                 raise FeishuApiError("Feishu field list contains an invalid item")
             name, field_type = item.get("field_name"), item.get("type")
             if not isinstance(name, str) or not isinstance(field_type, int):
                 raise FeishuApiError("Feishu field metadata is malformed")
-            output[name] = field_type
+            field_types[name] = field_type
+        return field_types
 
     def _check_field_types(self, actual_types: Mapping[str, int]) -> None:
         for field_name, expected_type in EXPECTED_FIELD_TYPES.items():
@@ -411,7 +282,7 @@ class FeishuClient:
         existing: set[str] = set()
         page_token: str | None = None
         while True:
-            params: dict[str, object] = {"page_size": 500}
+            params: dict[str, object] = {"page_size": RECORD_PAGE_SIZE}
             if page_token:
                 params["page_token"] = page_token
             payload = self._api_request(
@@ -421,31 +292,44 @@ class FeishuClient:
                 json_body={"field_names": ["论文URL"]},
             )
             data = self._response_data(payload, "record search")
-            self._collect_record_urls(data.get("items"), existing)
+            existing = existing.union(self._parse_record_urls(data.get("items")))
             if not data.get("has_more"):
                 return frozenset(existing)
             page_token = self._require_page_token(data, "record search")
 
-    def _collect_record_urls(self, items: object, output: set[str]) -> None:
+    def _parse_record_urls(self, items: object) -> frozenset[str]:
         if not isinstance(items, list):
             raise FeishuApiError("Feishu record search response has invalid items")
+        urls: set[str] = set()
         for item in items:
             if not isinstance(item, dict) or not isinstance(item.get("fields"), dict):
                 raise FeishuApiError("Feishu record search contains an invalid record")
             value = item["fields"].get("论文URL")
             if not isinstance(value, str) or not value:
                 raise FeishuApiError("Feishu record is missing a text 论文URL")
-            output.add(normalize_paper_url(value))
+            urls.add(normalize_paper_url(value))
+        return frozenset(urls)
 
     def batch_create_records(self, records: Sequence[dict[str, object]]) -> int:
         for start in range(0, len(records), BITABLE_BATCH_LIMIT):
             batch = records[start:start + BITABLE_BATCH_LIMIT]
-            self._api_request(
+            payload = self._api_request(
                 "POST",
                 self._table_path("records/batch_create"),
                 params={"client_token": str(uuid4())},
                 json_body={"records": [{"fields": fields} for fields in batch]},
             )
+            data = self._response_data(payload, "batch create")
+            created_records = data.get("records")
+            if not isinstance(created_records, list) or len(created_records) != len(batch):
+                raise FeishuApiError("Feishu batch create response has invalid records")
+            for record in created_records:
+                if not isinstance(record, dict):
+                    raise FeishuApiError("Feishu batch create response has invalid created record")
+                record_id = record.get("record_id")
+                fields = record.get("fields")
+                if not isinstance(record_id, str) or not record_id or not isinstance(fields, dict):
+                    raise FeishuApiError("Feishu batch create response has invalid created record")
         return len(records)
 
     def send_notification(self, papers: Sequence[Paper], inserted_count: int) -> int:

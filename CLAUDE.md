@@ -35,7 +35,7 @@ The app follows a linear pipeline orchestrated by `Executor` (`src/zotero_arxiv_
 2. **Filter corpus** — applies `include_path` glob patterns to select relevant collections
 3. **Retrieve new papers** — fetches from configured sources (arXiv RSS, bioRxiv/medRxiv REST API)
 4. **Rerank** — scores candidates by weighted similarity to corpus (newer Zotero papers weighted higher)
-5. **Generate TLDRs + affiliations** — via OpenAI-compatible LLM API
+5. **Generate one-sentence TLDRs** — via OpenAI-compatible LLM API
 6. **Persist + notify through Feishu** — validate the Bitable schema, canonicalize URLs, skip existing records, batch-create new records, and send interactive group cards
 
 `main.py` is the composition root. It creates immutable `FeishuSettings`, constructs `FeishuClient`, and injects the client into `Executor`. `Executor` owns the recommendation pipeline; `FeishuClient` owns Feishu authentication, pagination, Bitable writes, URL idempotency, and Webhook delivery.
@@ -54,7 +54,7 @@ Feishu credentials come from `FEISHU_APP_ID`, `FEISHU_APP_SECRET`, and `FEISHU_W
 
 ### Data Classes
 
-`Paper` and `CorpusPaper` in `src/zotero_arxiv_daily/protocol.py`. `Paper` has LLM-powered methods (`generate_tldr`, `generate_affiliations`) that call the OpenAI API directly.
+`Paper` and `CorpusPaper` are in `src/zotero_arxiv_daily/protocol.py`. `Paper.generate_tldr` calls the OpenAI-compatible API directly.
 
 ## Testing
 

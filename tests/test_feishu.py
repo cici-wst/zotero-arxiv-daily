@@ -51,7 +51,6 @@ def test_paper_to_record_fields_maps_paper_and_shanghai_date():
     paper = make_sample_paper(
         authors=["Author A", "Author B"],
         tldr="A concise summary.",
-        affiliations=["Institute A", "Institute B"],
         score=8.5,
     )
     recommendation_date = datetime(2026, 8, 11, 14, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
@@ -60,16 +59,16 @@ def test_paper_to_record_fields_maps_paper_and_shanghai_date():
 
     assert fields == {
         "标题": "Sample Paper Title",
-        "论文URL": "https://arxiv.org/abs/2026.00001",
-        "论文链接": {"text": "打开论文", "link": "https://arxiv.org/abs/2026.00001"},
         "作者": "Author A, Author B",
         "摘要": "This paper explores a novel approach to widget engineering.",
         "TLDR": "A concise summary.",
-        "作者单位": "Institute A, Institute B",
         "来源": "arxiv",
         "相关度": 8.5,
         "推荐日期": 1786377600000,
+        "论文URL": "https://arxiv.org/abs/2026.00001",
+        "论文链接": {"text": "打开论文", "link": "https://arxiv.org/abs/2026.00001"},
     }
+    assert list(fields)[-2:] == ["论文URL", "论文链接"]
 
 
 def test_deduplicate_papers_uses_canonical_url_and_keeps_first():
@@ -117,6 +116,66 @@ def test_notification_payload_truncates_only_tldr_when_one_paper_is_too_large():
     assert "完整内容见多维表格" in serialized
 
 
+def test_notification_payload_size_matches_requests_json_encoding():
+    paper = make_sample_paper(title="中文标题", tldr="中文摘要" * 2000)
+
+    payloads = build_notification_payloads(
+        [paper],
+        inserted_count=1,
+        table_url="https://my.feishu.cn/base/example",
+        max_body_bytes=900,
+    )
+
+    assert all(_payload_size(payload) <= 900 for payload in payloads)
+
+
+def test_notification_payload_rejects_when_truncation_marker_cannot_fit():
+    paper = make_sample_paper(title="T" * 120, tldr="摘要" * 100)
+
+    with pytest.raises(ValueError, match="truncation marker"):
+        build_notification_payloads(
+            [paper],
+            inserted_count=1,
+            table_url="https://my.feishu.cn/base/example",
+            max_body_bytes=800,
+        )
+
+
+def test_notification_payload_escapes_untrusted_lark_markdown():
+    paper = make_sample_paper(
+        title="<at id=all>全体成员</at> **伪标题**",
+        tldr="[伪链接](https://example.com)",
+    )
+
+    serialized = json.dumps(
+        build_notification_payloads(
+            [paper],
+            inserted_count=1,
+            table_url="https://my.feishu.cn/base/example",
+        ),
+        ensure_ascii=False,
+    )
+
+    assert "<at id=all>" not in serialized
+    content = build_notification_payloads(
+        [paper],
+        inserted_count=1,
+        table_url="https://my.feishu.cn/base/example",
+    )[0]["card"]["elements"][1]["text"]["content"]
+    assert "\\*\\*伪标题\\*\\*" in content
+    assert "\\[伪链接\\]\\(https://example\\.com\\)" in content
+
+
+def test_empty_notification_uses_explicit_no_papers_message():
+    payload = build_notification_payloads(
+        [],
+        inserted_count=0,
+        table_url="https://my.feishu.cn/base/example",
+    )[0]
+
+    assert "今日无新论文" in json.dumps(payload, ensure_ascii=False)
+
+
 def test_notification_payload_raises_when_fixed_content_cannot_fit():
     paper = make_sample_paper(title="T" * 2000, tldr="")
 
@@ -130,7 +189,7 @@ def test_notification_payload_raises_when_fixed_content_cannot_fit():
 
 
 def _payload_size(payload: dict[str, object]) -> int:
-    return len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+    return len(json.dumps(payload).encode("utf-8"))
 
 
 def _settings() -> FeishuSettings:
@@ -180,6 +239,11 @@ def _field_items():
         {"field_name": name, "type": field_type}
         for name, field_type in EXPECTED_FIELD_TYPES.items()
     ]
+
+
+def test_expected_schema_excludes_affiliations_and_places_urls_last():
+    assert "作者单位" not in EXPECTED_FIELD_TYPES
+    assert list(EXPECTED_FIELD_TYPES)[-2:] == ["论文URL", "论文链接"]
 
 
 def test_feishu_client_caches_tenant_token():
@@ -300,7 +364,11 @@ def test_batch_create_records_chunks_at_api_limit():
         if url.endswith("/auth/v3/tenant_access_token/internal"):
             return _token_response()
         calls.append(kwargs["json"])
-        return _success_response()
+        records = [
+            {"record_id": f"rec-{index}", "fields": record["fields"]}
+            for index, record in enumerate(kwargs["json"]["records"])
+        ]
+        return _success_response({"records": records})
 
     client = FeishuClient(_settings(), session=StubSession(handler))
     records = [{"标题": str(index), "论文URL": f"https://example.com/{index}"} for index in range(1001)]
@@ -319,13 +387,50 @@ def test_batch_create_records_exposes_second_batch_error():
         batch_count += 1
         if batch_count == 2:
             return StubResponse({"code": 999, "msg": "second batch denied"})
-        return _success_response()
+        records = [
+            {"record_id": f"rec-{index}", "fields": record["fields"]}
+            for index, record in enumerate(kwargs["json"]["records"])
+        ]
+        return _success_response({"records": records})
 
     client = FeishuClient(_settings(), session=StubSession(handler))
     records = [{"标题": str(index)} for index in range(1001)]
 
     with pytest.raises(FeishuApiError, match="second batch denied"):
         client.batch_create_records(records)
+
+
+def test_batch_create_records_rejects_missing_created_records():
+    def handler(method, url, kwargs):
+        if url.endswith("/auth/v3/tenant_access_token/internal"):
+            return _token_response()
+        return _success_response({})
+
+    client = FeishuClient(_settings(), session=StubSession(handler))
+
+    with pytest.raises(FeishuApiError, match="records"):
+        client.batch_create_records([{"标题": "Paper"}])
+
+
+@pytest.mark.parametrize(
+    "created_record",
+    [
+        {},
+        {"record_id": "rec-1"},
+        {"fields": {"标题": "Paper"}},
+        {"record_id": "", "fields": {"标题": "Paper"}},
+    ],
+)
+def test_batch_create_records_rejects_malformed_created_record(created_record):
+    def handler(method, url, kwargs):
+        if url.endswith("/auth/v3/tenant_access_token/internal"):
+            return _token_response()
+        return _success_response({"records": [created_record]})
+
+    client = FeishuClient(_settings(), session=StubSession(handler))
+
+    with pytest.raises(FeishuApiError, match="created record"):
+        client.batch_create_records([{"标题": "Paper"}])
 
 
 def test_send_notification_posts_each_card_and_requires_success():

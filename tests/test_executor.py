@@ -183,7 +183,7 @@ def test_run_end_to_end(config, monkeypatch):
     stub_zot = make_stub_zotero_client()
     monkeypatch.setattr("zotero_arxiv_daily.executor.zotero.Zotero", lambda *a, **kw: stub_zot)
 
-    # 2. Stub OpenAI (for reranker + TLDR/affiliations)
+    # 2. Stub OpenAI (for reranker + TLDR)
     stub_client = make_stub_openai_client()
     monkeypatch.setattr("zotero_arxiv_daily.executor.OpenAI", lambda **kw: stub_client)
     monkeypatch.setattr("zotero_arxiv_daily.reranker.api.OpenAI", lambda **kw: stub_client)

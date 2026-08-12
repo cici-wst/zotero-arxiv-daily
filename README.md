@@ -34,7 +34,6 @@
 ## ✨ Features
 - Totally free! All the calculation can be done in the Github Action runner locally within its quota (for public repo).
 - AI-generated TL;DR for you to quickly pick up target papers.
-- Affiliations of the paper are resolved and presented.
 - Paper links, metadata, and TLDRs are persisted in Feishu Bitable.
 - Feishu group cards link directly to the recommended papers and the Bitable.
 - Canonical paper URLs prevent duplicate Bitable records across repeated workflow runs.
@@ -66,12 +65,17 @@
 
    | Field | Feishu type |
    | :--- | :--- |
-   | 标题、论文URL、作者、摘要、TLDR、作者单位 | Text |
-   | 论文链接、代码链接 | URL |
+   | 标题、作者、摘要、TLDR、论文URL | Text |
+   | 代码链接、论文链接 | URL |
    | 来源 | Single select |
    | 分类 | Multiple select |
    | 相关度 | Number |
    | 发布日期、推荐日期 | Date |
+
+   `TLDR` is a one-sentence AI summary of the paper's core idea. Keep `论文URL`
+   as the canonical plain-text URL used for deduplication, and `论文链接` as the
+   clickable Feishu hyperlink. Place `论文URL` and `论文链接` as the final two
+   columns in that order.
 
 3. Set GitHub Actions secrets.
 ![secrets](./assets/secrets.png)
@@ -210,7 +214,7 @@ This project is in active development. You can subscribe this repo via `Watch` s
 
 
 ## 📖 How it works
-*Zotero-arXiv-Daily* retrieves papers from your Zotero library and papers released on the previous day. It calculates embedding similarity, reranks candidates, and generates TLDRs with an OpenAI-compatible API. Before delivery, it validates the 13-field Feishu Bitable schema, canonicalizes paper URLs, skips records already present in the table, batch-creates new records, and finally posts one or more size-limited interactive cards to the Feishu group.
+*Zotero-arXiv-Daily* retrieves papers from your Zotero library and papers released on the previous day. It calculates embedding similarity, reranks candidates, and generates one-sentence TLDRs with an OpenAI-compatible API. Before delivery, it validates the 12-field Feishu Bitable schema, canonicalizes paper URLs, skips records already present in the table, batch-creates new records, and finally posts one or more size-limited interactive cards to the Feishu group.
 
 ## 📌 Limitations
 - The recommendation algorithm is very simple, it may not accurately reflect your interest. Welcome better ideas for improving the algorithm!
