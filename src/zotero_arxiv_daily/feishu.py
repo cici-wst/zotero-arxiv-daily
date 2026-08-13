@@ -37,7 +37,6 @@ EXPECTED_FIELD_TYPES: Mapping[str, int] = MappingProxyType({
     "作者": FIELD_TYPE_TEXT,
     "摘要": FIELD_TYPE_TEXT,
     "TLDR": FIELD_TYPE_TEXT,
-    "来源": FIELD_TYPE_SINGLE_SELECT,
     "相关度": FIELD_TYPE_NUMBER,
     "发布日期": FIELD_TYPE_DATE,
     "推荐日期": FIELD_TYPE_DATE,
@@ -124,7 +123,6 @@ def paper_to_record_fields(paper: Paper, recommendation_date: datetime) -> dict[
         "作者": ", ".join(paper.authors),
         "摘要": paper.abstract,
         "TLDR": paper.tldr or "",
-        "来源": paper.source,
         "推荐日期": _shanghai_midnight_ms(recommendation_date),
     }
     if paper.published_at is not None:

@@ -64,7 +64,6 @@ def test_paper_to_record_fields_maps_paper_and_shanghai_date():
         "作者": "Author A, Author B",
         "摘要": "This paper explores a novel approach to widget engineering.",
         "TLDR": "A concise summary.",
-        "来源": "arxiv",
         "相关度": 8.5,
         "发布日期": 1786365000000,
         "推荐日期": 1786377600000,
@@ -256,6 +255,7 @@ def _field_items():
 
 
 def test_expected_schema_excludes_removed_fields_and_places_urls_last():
+    assert "来源" not in EXPECTED_FIELD_TYPES
     assert "作者单位" not in EXPECTED_FIELD_TYPES
     assert "分类" not in EXPECTED_FIELD_TYPES
     assert "代码链接" not in EXPECTED_FIELD_TYPES

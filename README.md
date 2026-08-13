@@ -67,7 +67,6 @@
    | :--- | :--- |
    | 标题、作者、摘要、TLDR、论文URL | Text |
    | 代码链接、论文链接 | URL |
-   | 来源 | Single select |
    | 分类 | Multiple select |
    | 相关度 | Number |
    | 发布日期、推荐日期 | Date |
