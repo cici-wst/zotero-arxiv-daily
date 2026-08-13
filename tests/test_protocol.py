@@ -96,6 +96,28 @@ def test_tldr_rejects_empty_string_response(llm_params):
     assert paper.tldr is None
 
 
+@pytest.mark.parametrize(
+    "response",
+    [
+        "<!doctype html><meta name='aliyun_waf_aa' content='x'>",
+        "<html><title>Access Verification</title></html>",
+        "访问验证，请滑动完成验证",
+    ],
+)
+def test_tldr_rejects_waf_or_html_response(llm_params, response):
+    from types import SimpleNamespace
+
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **_: response))
+    )
+    paper = make_sample_paper()
+
+    with pytest.raises(ValueError, match="HTML or access-verification"):
+        paper.generate_tldr(client, llm_params)
+
+    assert paper.tldr is None
+
+
 def test_tldr_truncates_long_prompt(llm_params):
     client = make_stub_openai_client()
     paper = make_sample_paper(full_text="word " * 10000)

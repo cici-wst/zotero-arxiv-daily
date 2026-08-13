@@ -1,4 +1,4 @@
-"""Tests for BaseReranker: scoring, sorting, time decay, unknown reranker."""
+"""Tests for BaseReranker: scoring, sorting, and unknown reranker."""
 
 import numpy as np
 import pytest
@@ -34,25 +34,28 @@ def test_rerank_scores_and_sorts():
     assert ranked[0].score > ranked[1].score
 
 
-def test_rerank_time_decay_weighting():
-    corpus = make_sample_corpus(3)
+def test_rerank_uses_mean_of_top_five_similarities():
+    corpus = make_sample_corpus(7)
     papers = [make_sample_paper(title="P")]
+    sim = np.array([[0.9, 0.8, 0.7, 0.6, 0.5, 0.1, 0.0]])
 
-    # Only similar to the oldest paper (index 2 after reverse-sort by date)
-    sim = np.array([[0.0, 0.0, 1.0]])
-    reranker = StubReranker(sim)
-    ranked_old = reranker.rerank(papers, corpus)
-    score_old = ranked_old[0].score
+    ranked = StubReranker(sim).rerank(papers, corpus)
 
-    # Only similar to the newest paper (index 0 after reverse-sort by date)
-    papers2 = [make_sample_paper(title="P")]
-    sim2 = np.array([[1.0, 0.0, 0.0]])
-    reranker2 = StubReranker(sim2)
-    ranked_new = reranker2.rerank(papers2, corpus)
-    score_new = ranked_new[0].score
+    assert ranked[0].score == pytest.approx(7.0)
 
-    # Newest corpus paper gets higher time-decay weight, so score should be higher
-    assert score_new > score_old
+
+def test_rerank_clips_scores_to_zero_to_ten():
+    corpus = make_sample_corpus(2)
+    papers = [
+        make_sample_paper(title="Above"),
+        make_sample_paper(title="Below"),
+    ]
+    sim = np.array([[1.2, 1.1], [-0.3, -0.1]])
+
+    ranked = StubReranker(sim).rerank(papers, corpus)
+
+    assert ranked[0].score == pytest.approx(10.0)
+    assert ranked[1].score == pytest.approx(0.0)
 
 
 def test_rerank_single_candidate_single_corpus():
@@ -63,6 +66,14 @@ def test_rerank_single_candidate_single_corpus():
     ranked = reranker.rerank(papers, corpus)
     assert len(ranked) == 1
     assert ranked[0].score is not None
+
+
+def test_rerank_rejects_empty_zotero_corpus():
+    papers = [make_sample_paper()]
+    reranker = StubReranker(np.empty((1, 0)))
+
+    with pytest.raises(ValueError, match="empty Zotero corpus"):
+        reranker.rerank(papers, [])
 
 
 def test_get_reranker_cls_unknown():

@@ -1,7 +1,7 @@
 import pytest
 import json
 from dataclasses import FrozenInstanceError
-from datetime import datetime
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -52,6 +52,7 @@ def test_paper_to_record_fields_maps_paper_and_shanghai_date():
         authors=["Author A", "Author B"],
         tldr="A concise summary.",
         score=8.5,
+        published_at=datetime(2026, 8, 10, 12, 30, tzinfo=timezone.utc),
     )
     recommendation_date = datetime(2026, 8, 11, 14, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
 
@@ -64,6 +65,7 @@ def test_paper_to_record_fields_maps_paper_and_shanghai_date():
         "TLDR": "A concise summary.",
         "来源": "arxiv",
         "相关度": 8.5,
+        "发布日期": 1786365000000,
         "推荐日期": 1786377600000,
         "论文URL": "https://arxiv.org/abs/2026.00001",
         "论文链接": {"text": "打开论文", "link": "https://arxiv.org/abs/2026.00001"},
@@ -241,8 +243,10 @@ def _field_items():
     ]
 
 
-def test_expected_schema_excludes_affiliations_and_places_urls_last():
+def test_expected_schema_excludes_removed_fields_and_places_urls_last():
     assert "作者单位" not in EXPECTED_FIELD_TYPES
+    assert "分类" not in EXPECTED_FIELD_TYPES
+    assert "代码链接" not in EXPECTED_FIELD_TYPES
     assert list(EXPECTED_FIELD_TYPES)[-2:] == ["论文URL", "论文链接"]
 
 

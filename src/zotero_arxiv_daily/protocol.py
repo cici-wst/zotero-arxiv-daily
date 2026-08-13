@@ -5,6 +5,13 @@ import tiktoken
 from openai import OpenAI
 from loguru import logger
 RawPaperItem = TypeVar('RawPaperItem')
+INVALID_LLM_RESPONSE_MARKERS = (
+    "<!doctype html",
+    "<html",
+    "aliyun_waf",
+    "access verification",
+    "访问验证",
+)
 
 
 def _extract_tldr(response: object) -> str:
@@ -19,6 +26,8 @@ def _extract_tldr(response: object) -> str:
     tldr = content.strip()
     if not tldr:
         raise ValueError("LLM returned an empty TLDR")
+    if any(marker in tldr.lower() for marker in INVALID_LLM_RESPONSE_MARKERS):
+        raise ValueError("LLM returned HTML or access-verification content")
     return tldr
 
 @dataclass
@@ -30,6 +39,7 @@ class Paper:
     url: str
     pdf_url: Optional[str] = None
     full_text: Optional[str] = None
+    published_at: Optional[datetime] = None
     tldr: Optional[str] = None
     score: Optional[float] = None
 

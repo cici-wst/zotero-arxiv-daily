@@ -1,6 +1,7 @@
 """Tests for ArxivRetriever."""
 
 import time
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import feedparser
@@ -43,6 +44,7 @@ def test_arxiv_retriever(config, mock_feedparser, monkeypatch):
             summary="Test abstract",
             pdf_url=f"https://arxiv.org/pdf/{pid}",
             entry_id=f"https://arxiv.org/abs/{pid}",
+            published=datetime(2026, 8, 13, 9, 0, tzinfo=timezone.utc),
             source_url=lambda pid=pid: f"https://arxiv.org/e-print/{pid}",
         ))
 
@@ -64,6 +66,7 @@ def test_arxiv_retriever(config, mock_feedparser, monkeypatch):
 
     assert len(papers) == len(new_entries)
     assert set(p.title for p in papers) == set(e.title for e in new_entries)
+    assert all(p.published_at == datetime(2026, 8, 13, 9, 0, tzinfo=timezone.utc) for p in papers)
 
 
 def test_run_with_hard_timeout_returns_value():
