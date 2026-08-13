@@ -11,6 +11,14 @@ from zotero_arxiv_daily.feishu import DeliveryResult
 from zotero_arxiv_daily.protocol import CorpusPaper
 
 
+class StubEncoding:
+    def encode(self, text: str) -> list[int]:
+        return [ord(character) for character in text]
+
+    def decode(self, tokens: list[int]) -> str:
+        return "".join(chr(token) for token in tokens)
+
+
 class StubDeliveryClient:
     def __init__(self):
         self.calls = []
@@ -171,6 +179,10 @@ def test_run_end_to_end(config, monkeypatch):
         make_sample_paper,
         make_stub_openai_client,
         make_stub_zotero_client,
+    )
+    monkeypatch.setattr(
+        "zotero_arxiv_daily.protocol.tiktoken.encoding_for_model",
+        lambda _: StubEncoding(),
     )
 
     # Config: source=["arxiv"], reranker="api", send_empty=false

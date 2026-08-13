@@ -6,6 +6,21 @@ from openai import OpenAI
 from loguru import logger
 RawPaperItem = TypeVar('RawPaperItem')
 
+
+def _extract_tldr(response: object) -> str:
+    if isinstance(response, str):
+        content = response
+    else:
+        content = response.choices[0].message.content
+
+    if not isinstance(content, str):
+        raise TypeError("LLM returned a non-text TLDR")
+
+    tldr = content.strip()
+    if not tldr:
+        raise ValueError("LLM returned an empty TLDR")
+    return tldr
+
 @dataclass
 class Paper:
     source: str
@@ -50,19 +65,12 @@ class Paper:
             ],
             **llm_params.get('generation_kwargs', {})
         )
-        tldr = response.choices[0].message.content
-        return tldr
+        return _extract_tldr(response)
     
     def generate_tldr(self, openai_client:OpenAI,llm_params:dict) -> str:
-        try:
-            tldr = self._generate_tldr_with_llm(openai_client,llm_params)
-            self.tldr = tldr
-            return tldr
-        except Exception as e:
-            logger.warning(f"Failed to generate tldr of {self.url}: {e}")
-            tldr = self.abstract
-            self.tldr = tldr
-            return tldr
+        tldr = self._generate_tldr_with_llm(openai_client,llm_params)
+        self.tldr = tldr
+        return tldr
 
 @dataclass
 class CorpusPaper:

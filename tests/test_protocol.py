@@ -42,6 +42,22 @@ def test_tldr_returns_response(llm_params):
     assert paper.tldr == result
 
 
+def test_tldr_accepts_plain_string_response(llm_params):
+    from types import SimpleNamespace
+
+    client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(create=lambda **_: "  公益站生成的 TLDR  ")
+        )
+    )
+    paper = make_sample_paper()
+
+    result = paper.generate_tldr(client, llm_params)
+
+    assert result == "公益站生成的 TLDR"
+    assert paper.tldr == result
+
+
 def test_tldr_without_abstract_or_fulltext(llm_params):
     client = make_stub_openai_client()
     paper = make_sample_paper(abstract="", full_text=None)
@@ -49,7 +65,7 @@ def test_tldr_without_abstract_or_fulltext(llm_params):
     assert "Failed to generate TLDR" in result
 
 
-def test_tldr_falls_back_to_abstract_on_error(llm_params):
+def test_tldr_raises_when_api_call_fails(llm_params):
     paper = make_sample_paper()
 
     # Client whose create() raises
@@ -60,8 +76,24 @@ def test_tldr_falls_back_to_abstract_on_error(llm_params):
             completions=SimpleNamespace(create=lambda **kw: (_ for _ in ()).throw(RuntimeError("API down")))
         )
     )
-    result = paper.generate_tldr(broken_client, llm_params)
-    assert result == paper.abstract
+    with pytest.raises(RuntimeError, match="API down"):
+        paper.generate_tldr(broken_client, llm_params)
+
+    assert paper.tldr is None
+
+
+def test_tldr_rejects_empty_string_response(llm_params):
+    from types import SimpleNamespace
+
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **_: "   "))
+    )
+    paper = make_sample_paper()
+
+    with pytest.raises(ValueError, match="empty TLDR"):
+        paper.generate_tldr(client, llm_params)
+
+    assert paper.tldr is None
 
 
 def test_tldr_truncates_long_prompt(llm_params):
