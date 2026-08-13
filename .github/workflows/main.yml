@@ -2,7 +2,8 @@ name: Deliver papers to Feishu daily
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 22 * * *'
+    # GitHub Actions uses UTC; 02:00 UTC is 10:00 Asia/Shanghai.
+    - cron: '0 2 * * *'
 
 jobs:
   retrieve-and-deliver:
@@ -31,4 +32,4 @@ jobs:
           printf "%b\n" "$CUSTOM_CONFIG" > config/custom.yaml
           echo "Use custom config: "
           cat config/custom.yaml
-          uv run src/zotero_arxiv_daily/main.py
+          uv run src/zotero_arxiv_daily/main.py executor.max_paper_num=10
