@@ -19,7 +19,7 @@ llm:
 
 source:
   arxiv:
-    category: ["cs.AI","cs.CV","cs.LG","cs.CL"]
+    category: ["cs.LG","cs.AI","q-bio.QM","q-bio.GN","q-bio.MN","q-bio.BM"]
 
 executor:
   debug: ${oc.env:DEBUG,null}
