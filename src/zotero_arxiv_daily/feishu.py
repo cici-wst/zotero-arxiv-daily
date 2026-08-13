@@ -130,7 +130,7 @@ def paper_to_record_fields(paper: Paper, recommendation_date: datetime) -> dict[
     if paper.published_at is not None:
         fields["发布日期"] = int(paper.published_at.timestamp() * 1000)
     if paper.score is not None:
-        fields["相关度"] = paper.score
+        fields["相关度"] = float(paper.score)
     fields["论文URL"] = canonical_url
     fields["论文链接"] = {"text": "打开论文", "link": canonical_url}
     return fields

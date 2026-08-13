@@ -1,5 +1,6 @@
 import pytest
 import json
+import numpy as np
 from dataclasses import FrozenInstanceError
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -71,6 +72,17 @@ def test_paper_to_record_fields_maps_paper_and_shanghai_date():
         "论文链接": {"text": "打开论文", "link": "https://arxiv.org/abs/2026.00001"},
     }
     assert list(fields)[-2:] == ["论文URL", "论文链接"]
+
+
+def test_paper_to_record_fields_converts_numpy_score_to_json_number():
+    paper = make_sample_paper(score=np.float32(8.5))
+    recommendation_date = datetime(2026, 8, 11, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+    fields = paper_to_record_fields(paper, recommendation_date)
+
+    assert fields["相关度"] == 8.5
+    assert isinstance(fields["相关度"], float)
+    json.dumps(fields)
 
 
 def test_deduplicate_papers_uses_canonical_url_and_keeps_first():
