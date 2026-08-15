@@ -40,7 +40,6 @@ EXPECTED_FIELD_TYPES: Mapping[str, int] = MappingProxyType({
     "相关度": FIELD_TYPE_NUMBER,
     "发布日期": FIELD_TYPE_DATE,
     "推荐日期": FIELD_TYPE_DATE,
-    "论文URL": FIELD_TYPE_TEXT,
     "论文链接": FIELD_TYPE_URL,
 })
 
@@ -108,6 +107,15 @@ def normalize_paper_url(url: str) -> str:
     return urlunsplit((parsed.scheme.lower(), host, path, "", ""))
 
 
+def _normalize_hyperlink_value(value: object) -> str:
+    if not isinstance(value, Mapping):
+        raise FeishuApiError("Feishu record is missing a valid 论文链接")
+    link = value.get("link")
+    if not isinstance(link, str) or not link:
+        raise FeishuApiError("Feishu record is missing a valid 论文链接")
+    return normalize_paper_url(link)
+
+
 def _shanghai_midnight_ms(value: datetime) -> int:
     if value.tzinfo is None:
         raise ValueError("recommendation_date must be timezone-aware")
@@ -129,7 +137,6 @@ def paper_to_record_fields(paper: Paper, recommendation_date: datetime) -> dict[
         fields["发布日期"] = int(paper.published_at.timestamp() * 1000)
     if paper.score is not None:
         fields["相关度"] = float(paper.score)
-    fields["论文URL"] = canonical_url
     fields["论文链接"] = {"text": "打开论文", "link": canonical_url}
     return fields
 
@@ -287,7 +294,7 @@ class FeishuClient:
                 "POST",
                 self._table_path("records/search"),
                 params=params,
-                json_body={"field_names": ["论文URL"]},
+                json_body={"field_names": ["论文链接"]},
             )
             data = self._response_data(payload, "record search")
             existing = existing.union(self._parse_record_urls(data.get("items")))
@@ -302,10 +309,8 @@ class FeishuClient:
         for item in items:
             if not isinstance(item, dict) or not isinstance(item.get("fields"), dict):
                 raise FeishuApiError("Feishu record search contains an invalid record")
-            value = item["fields"].get("论文URL")
-            if not isinstance(value, str) or not value:
-                raise FeishuApiError("Feishu record is missing a text 论文URL")
-            urls.add(normalize_paper_url(value))
+            value = item["fields"].get("论文链接")
+            urls.add(_normalize_hyperlink_value(value))
         return frozenset(urls)
 
     def batch_create_records(self, records: Sequence[dict[str, object]]) -> int:
@@ -355,7 +360,7 @@ class FeishuClient:
         records = [paper_to_record_fields(paper, recommendation_date) for paper in unique_papers]
         missing_records = [
             record for record in records
-            if record["论文URL"] not in existing_urls
+            if _normalize_hyperlink_value(record.get("论文链接")) not in existing_urls
         ]
         inserted_count = self.batch_create_records(missing_records)
         self.send_notification(unique_papers, inserted_count)

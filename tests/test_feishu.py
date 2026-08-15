@@ -67,10 +67,9 @@ def test_paper_to_record_fields_maps_paper_and_shanghai_date():
         "相关度": 8.5,
         "发布日期": 1786365000000,
         "推荐日期": 1786377600000,
-        "论文URL": "https://arxiv.org/abs/2026.00001",
         "论文链接": {"text": "打开论文", "link": "https://arxiv.org/abs/2026.00001"},
     }
-    assert list(fields)[-2:] == ["论文URL", "论文链接"]
+    assert list(fields)[-1:] == ["论文链接"]
 
 
 def test_paper_to_record_fields_converts_numpy_score_to_json_number():
@@ -259,7 +258,8 @@ def test_expected_schema_excludes_removed_fields_and_places_urls_last():
     assert "作者单位" not in EXPECTED_FIELD_TYPES
     assert "分类" not in EXPECTED_FIELD_TYPES
     assert "代码链接" not in EXPECTED_FIELD_TYPES
-    assert list(EXPECTED_FIELD_TYPES)[-2:] == ["论文URL", "论文链接"]
+    assert "论文URL" not in EXPECTED_FIELD_TYPES
+    assert list(EXPECTED_FIELD_TYPES)[-1:] == ["论文链接"]
 
 
 def test_feishu_client_caches_tenant_token():
@@ -334,10 +334,14 @@ def test_list_existing_urls_follows_pagination():
         if url.endswith("/auth/v3/tenant_access_token/internal"):
             return _token_response()
         assert method == "POST"
+        assert kwargs["json"] == {"field_names": ["论文链接"]}
         if kwargs["params"].get("page_token") == "next":
-            return _success_response({"items": [{"fields": {"论文URL": "https://arxiv.org/abs/2"}}], "has_more": False})
+            return _success_response({
+                "items": [{"fields": {"论文链接": {"text": "打开论文", "link": "https://arxiv.org/abs/2"}}}],
+                "has_more": False,
+            })
         return _success_response({
-            "items": [{"fields": {"论文URL": "https://arxiv.org/pdf/1.pdf"}}],
+            "items": [{"fields": {"论文链接": {"text": "打开论文", "link": "https://arxiv.org/pdf/1.pdf"}}}],
             "has_more": True,
             "page_token": "next",
         })
@@ -350,18 +354,29 @@ def test_list_existing_urls_follows_pagination():
     assert isinstance(result, frozenset)
 
 
-def test_list_existing_urls_rejects_malformed_url_field():
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {},
+        {"论文链接": None},
+        {"论文链接": {}},
+        {"论文链接": {"text": "打开论文"}},
+        {"论文链接": {"link": 123}},
+        {"论文链接": {"link": ""}},
+    ],
+)
+def test_list_existing_urls_rejects_malformed_url_field(fields):
     def handler(method, url, kwargs):
         if url.endswith("/auth/v3/tenant_access_token/internal"):
             return _token_response()
         return _success_response({
-            "items": [{"fields": {"论文URL": {"text": "not-a-string"}}}],
+            "items": [{"fields": fields}],
             "has_more": False,
         })
 
     client = FeishuClient(_settings(), session=StubSession(handler))
 
-    with pytest.raises(FeishuApiError, match="论文URL"):
+    with pytest.raises(FeishuApiError, match="论文链接"):
         client.list_existing_urls()
 
 
@@ -387,7 +402,7 @@ def test_batch_create_records_chunks_at_api_limit():
         return _success_response({"records": records})
 
     client = FeishuClient(_settings(), session=StubSession(handler))
-    records = [{"标题": str(index), "论文URL": f"https://example.com/{index}"} for index in range(1001)]
+    records = [{"标题": str(index)} for index in range(1001)]
 
     assert client.batch_create_records(records) == 1001
     assert [len(call["records"]) for call in calls] == [1000, 1]
@@ -472,6 +487,52 @@ def test_send_notification_hides_webhook_url_when_api_rejects_request():
 
     assert "group webhook" in str(error.value)
     assert _settings().webhook_url not in str(error.value)
+
+
+def test_deliver_uses_hyperlink_records_for_dedup():
+    existing = make_sample_paper(url="https://arxiv.org/abs/2601.00001", title="Existing")
+    new_one = make_sample_paper(url="https://example.com/new-one", title="New One")
+    batch_payloads = []
+
+    def handler(method, url, kwargs):
+        if url.endswith("/auth/v3/tenant_access_token/internal"):
+            return _token_response()
+        if url.endswith("/fields"):
+            return _success_response({"items": _field_items(), "has_more": False})
+        if url.endswith("/records/search"):
+            assert method == "POST"
+            assert kwargs["json"] == {"field_names": ["论文链接"]}
+            return _success_response({
+                "items": [{
+                    "fields": {
+                        "论文链接": {
+                            "text": "打开论文",
+                            "link": "https://arxiv.org/pdf/2601.00001v3.pdf",
+                        }
+                    }
+                }],
+                "has_more": False,
+            })
+        if url.endswith("/records/batch_create"):
+            batch_payloads.append(kwargs["json"])
+            records = [
+                {"record_id": f"rec-{index}", "fields": record["fields"]}
+                for index, record in enumerate(kwargs["json"]["records"])
+            ]
+            return _success_response({"records": records})
+        assert url == _settings().webhook_url
+        return _success_response()
+
+    client = FeishuClient(_settings(), session=StubSession(handler))
+
+    result = client.deliver([existing, new_one], _recommendation_date())
+
+    assert result.recommended_count == 2
+    assert result.inserted_count == 1
+    assert len(batch_payloads) == 1
+    inserted = batch_payloads[0]["records"]
+    assert [record["fields"]["标题"] for record in inserted] == ["New One"]
+    assert "论文URL" not in inserted[0]["fields"]
 
 
 class RecordingDeliveryClient(FeishuClient):

@@ -76,7 +76,7 @@ def normalize_paper_url(url: str) -> str:
 
 - [ ] **Step 4: Write failing record mapping tests**
 
-Assert exact field names/types, normalized `论文URL`, URL-object shape, joined authors/affiliations, score, and Asia/Shanghai midnight timestamp.
+Assert exact field names/types, canonical URL in the `论文链接` URL object, joined authors/affiliations, score, and Asia/Shanghai midnight timestamp.
 
 - [ ] **Step 5: Implement `paper_to_record_fields()`**
 
@@ -85,7 +85,6 @@ def paper_to_record_fields(paper: Paper, recommendation_date: datetime) -> dict[
     canonical_url = normalize_paper_url(paper.url)
     return {
         "标题": paper.title,
-        "论文URL": canonical_url,
         "论文链接": {"text": "打开论文", "link": canonical_url},
         "作者": ", ".join(paper.authors),
         "摘要": paper.abstract,
@@ -156,7 +155,7 @@ Use a frozen `RequestOptions` object instead of more than three positional param
 
 - [ ] **Step 4: Write failing schema-validation tests**
 
-Test all 13 configured fields, including fields not currently populated: `标题`、`论文URL`、`论文链接`、`作者`、`摘要`、`TLDR`、`作者单位`、`来源`、`分类`、`相关度`、`发布日期`、`推荐日期`、`代码链接`. Types are Text=1, Number=2, SingleSelect=3, MultiSelect=4, DateTime=5, URL=15. Missing or mismatched fields must name the offending field.
+Test all current configured fields, including fields not currently populated: `标题`、`论文链接`、`作者`、`摘要`、`TLDR`、`作者单位`、`来源`、`分类`、`相关度`、`发布日期`、`推荐日期`、`代码链接`. Types are Text=1, Number=2, SingleSelect=3, MultiSelect=4, DateTime=5, URL=15. Missing or mismatched fields must name the offending field.
 
 - [ ] **Step 5: Implement `validate_table_schema()`**
 
@@ -164,7 +163,7 @@ GET `/bitable/v1/apps/{app_token}/tables/{table_id}/fields`, follow pagination, 
 
 - [ ] **Step 6: Write failing existing-URL pagination tests**
 
-POST `/records/search?page_size=500`, request only `论文URL`, continue with `page_token`, normalize returned values, and return a frozen set.
+POST `/records/search?page_size=500`, request only `论文链接`, extract and normalize each returned `link`, continue with `page_token`, and return a frozen set.
 
 - [ ] **Step 7: Implement `list_existing_urls()`**
 
@@ -195,7 +194,7 @@ def deliver(self, papers: Sequence[Paper], recommendation_date: datetime) -> Del
     existing = self.list_existing_urls()
     unique_papers = deduplicate_papers(papers)
     records = [paper_to_record_fields(p, recommendation_date) for p in unique_papers]
-    missing = [record for record in records if record["论文URL"] not in existing]
+    missing = [record for record in records if normalize_paper_url(record["论文链接"]["link"]) not in existing]
     inserted = self.batch_create_records(missing)
     self.send_notification(unique_papers, inserted)
     return DeliveryResult(len(unique_papers), inserted)
